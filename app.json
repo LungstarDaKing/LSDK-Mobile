@@ -1,0 +1,85 @@
+{
+  "expo": {
+    "name": "LSDK Chat",
+    "slug": "lsdk-chat",
+    "scheme": "lsdkchat",
+    "version": "0.13.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "backgroundColor": "#0e0a1e",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.lungstardaking.lsdkchat",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": []
+      }
+    },
+    "android": {
+      "package": "com.lungstardaking.lsdkchat",
+      "adaptiveIcon": {
+        "backgroundColor": "#6b46f5",
+        "foregroundImage": "./assets/adaptive-icon.png"
+      },
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.BLUETOOTH_CONNECT"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "LSDK Chat needs your photos so you can send pictures and videos and choose a profile picture.",
+          "cameraPermission": "LSDK Chat needs the camera so you can take photos and make video calls.",
+          "microphonePermission": "LSDK Chat needs the microphone so you can record voice notes and make calls."
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "LSDK Chat needs the microphone so you can record voice notes and make calls.",
+          "enableBackgroundPlayback": false
+        }
+      ],
+      "expo-video",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "LSDK Chat needs the camera so you can take photos and make video calls.",
+          "microphonePermission": "LSDK Chat needs the microphone so you can record voice notes and make calls."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#6b46f5"
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "LSDK Chat uses the microphone so you can dictate messages by speaking.",
+          "speechRecognitionPermission": "LSDK Chat uses speech recognition so you can dictate messages by speaking."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0e0a1e"
+    }
+  }
+}
