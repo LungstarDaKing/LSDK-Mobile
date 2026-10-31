@@ -27,6 +27,17 @@ export function useGame(roomId: string) {
     return () => { alive.current = false; off(); };
   }, [roomId, reload]);
 
+  // Safety net for "real time": while a game is on, quietly re-read it every 1.5 s. If the realtime push is working this changes
+  // nothing; if the push is late, blocked or the table isn't published for realtime, both players still see each move within ~1.5 s.
+  const activeId = game && game.status === 'active' ? game.id : null;
+  useEffect(() => {
+    if (!activeId) return;
+    const t = setInterval(() => {
+      void gameApi.latest(roomId).then((g) => { if (alive.current && g) setGame((cur) => (!cur || cur.id !== g.id || g.version >= cur.version ? g : cur)); }).catch(() => {});
+    }, 1500);
+    return () => clearInterval(t);
+  }, [activeId, roomId]);
+
   const run = useCallback(async (fn: () => Promise<void>) => {
     if (busy) return;
     setBusy(true); setError(null);

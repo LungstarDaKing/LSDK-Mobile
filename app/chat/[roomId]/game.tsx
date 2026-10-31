@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, TextInput, View, useWindowDimensions } from 'react-native';
+import { AccessibilityInfo, Animated, Easing, PanResponder, Pressable, TextInput, View, useWindowDimensions } from 'react-native';
 import { ActionSheet, ConfirmDialog, PromptDialog } from '@/components/dialogs';
 import { Banner, Button, Screen, Text } from '@/components/ui';
 import { useAuth } from '@/features/auth/AuthProvider';
@@ -30,7 +30,7 @@ export default function GameScreen() {
   const live = game && game.status === 'active' ? game : null;
 
   return (
-    <Screen scroll>
+    <Screen scroll={!(live && live.kind === 'darts')}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: space.sm }}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={{ minWidth: MIN_TOUCH, minHeight: MIN_TOUCH, justifyContent: 'center' }}><Text variant="title" style={{ color: colors.accent }}>‹</Text></Pressable>
         <Text variant="title">Games{other ? ` with ${who(other.profile_id)}` : ''}</Text>
@@ -205,47 +205,96 @@ function Twenty({ game, me, busy, onMove }: PanelProps & { onMove: (m: NonNullab
   );
 }
 
+// Flick to throw: swipe UP across the board. The swipe's sideways lean aims left/right; its SPEED sets the height
+// (too slow = the dart drops low, too fast = it flies high). A dart animates from your hand to where it lands.
+const IDEAL_SPEED = 1.3;     // px per ms: a firm flick lands on the bullseye line
 function Darts({ game, me, busy, onMove, who }: PanelProps & { onMove: (m: NonNullable<ReturnType<typeof dartsPlay>>) => void; who: (id: string) => string }) {
   const { width } = useWindowDimensions();
-  const size = Math.min(width - 32, 340);
+  const size = Math.min(width - 32, 320);
   const first = me === game.p1;
   const mineLeft: number = (first ? game.state.s1 : game.state.s2) ?? DART_START;
   const theirsLeft: number = (first ? game.state.s2 : game.state.s1) ?? DART_START;
   const mine = game.status === 'active' && game.turn === me && !busy;
   const [thrown, setThrown] = useState<{ x: number; y: number; pts: number; label: string }[]>([]);
-  const [aim, setAim] = useState({ x: 0, y: 0 });
   const [sent, setSent] = useState(false);
-  const aimRef = useRef(aim);
-  useEffect(() => { setThrown([]); setSent(false); }, [game.version]);
-  useEffect(() => {
-    if (!mine || sent) return;
-    let raf = 0; const t0 = Date.now(); const speed = 1 + thrown.length * 0.18;
-    const loop = () => { const t = ((Date.now() - t0) / 1000) * speed; const a = { x: Math.sin(t * 1.7) * 0.92, y: Math.sin(t * 2.3 + 1) * 0.92 }; aimRef.current = a; setAim(a); raf = requestAnimationFrame(loop); };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [mine, sent, thrown.length]);
+  const [hint, setHint] = useState<string | null>(null);
+  const [screenReader, setScreenReader] = useState(false);
+  const fly = useRef(new Animated.Value(0)).current;
+  const [flight, setFlight] = useState<{ fx: number; fy: number; tx: number; ty: number } | null>(null);
+  const state = useRef({ mine, sent, thrown, mineLeft, game, me, onMove, flying: false });
+  state.current = { mine, sent, thrown, mineLeft, game, me, onMove, flying: state.current.flying };
+  const zoneH = Math.round(size * 0.42);
+  useEffect(() => { setThrown([]); setSent(false); setHint(null); }, [game.version]);
+  useEffect(() => { void AccessibilityInfo.isScreenReaderEnabled().then(setScreenReader).catch(() => {}); }, []);
   const remaining = mineLeft - thrown.reduce((a, d) => a + d.pts, 0);
   const note = !thrown.length ? '' : remaining < 0 ? 'Bust! Over zero' : remaining === 0 ? 'Checkout!' : `${remaining} left`;
 
-  function doThrow() {
-    if (!mine || sent || thrown.length >= 3) return;
-    const x = aimRef.current.x + (Math.random() - 0.5) * 0.06, y = aimRef.current.y + (Math.random() - 0.5) * 0.06;
-    const next = [...thrown, { x, y, ...dartScore(x, y) }];
-    setThrown(next);
-    const left = mineLeft - next.reduce((a, d) => a + d.pts, 0);
-    if (left <= 0 || next.length === 3) { setSent(true); setTimeout(() => { const m = dartsPlay(game, me, next); if (m) onMove(m); }, 1100); }
+  function land(x: number, y: number, fromX: number) {
+    const st = state.current;
+    if (!st.mine || st.sent || st.thrown.length >= 3 || st.flying) return;
+    st.flying = true;
+    const px = (u: number) => (u * 100 / 236) * size + size / 2;       // board units -> pixels inside the board box
+    const tx = px(x), ty = px(y), fx = size / 2 + fromX, fy = size + zoneH * 0.6;
+    setFlight({ fx, fy, tx, ty }); fly.setValue(0);
+    Animated.timing(fly, { toValue: 1, duration: 320, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(() => {
+      state.current.flying = false; setFlight(null);
+      const next = [...state.current.thrown, { x, y, ...dartScore(x, y) }];
+      setThrown(next);
+      const left = state.current.mineLeft - next.reduce((a, d) => a + d.pts, 0);
+      if (left <= 0 || next.length === 3) {
+        setSent(true);
+        setTimeout(() => { const m = dartsPlay(state.current.game, state.current.me, next); if (m) state.current.onMove(m); }, 1000);
+      }
+    });
   }
-  const turns: { by: number; darts: string[]; total: number; bust: boolean }[] = (game.state.turns ?? []).slice(-6).reverse();
+  const landRef = useRef(land); landRef.current = land;   // the gesture handler is created once; always call the latest version
+  function tapThrow() { land((Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, 0); }   // for screen-reader users only
+
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => state.current.mine && !state.current.sent && !state.current.flying,
+    onMoveShouldSetPanResponder: () => state.current.mine && !state.current.sent && !state.current.flying,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderRelease: (_e, g) => {
+      const speed = Math.hypot(g.vx, g.vy);                      // px per ms at release
+      if (g.dy > -40 || -g.vy < 0.3) { setHint('Flick upward, quick and firm'); return; }
+      setHint(null);
+      const lean = g.dx / Math.max(40, -g.dy);                    // sideways lean of the swipe
+      const x = Math.max(-1.35, Math.min(1.35, lean * 1.25)) + (Math.random() - 0.5) * 0.05;
+      const y = Math.max(-1.35, Math.min(1.35, (IDEAL_SPEED - speed) * 0.85)) + (Math.random() - 0.5) * 0.05;
+      landRef.current(x, y, 0);
+    },
+  })).current;
+
+  const turns: { by: number; darts: string[]; total: number; bust: boolean }[] = (game.state.turns ?? []).slice(-3).reverse();
+  const dartStyle = flight ? {
+    position: 'absolute' as const, left: 0, top: 0, width: 14, height: 34, alignItems: 'center' as const,
+    transform: [
+      { translateX: fly.interpolate({ inputRange: [0, 1], outputRange: [flight.fx - 7, flight.tx - 7] }) },
+      { translateY: fly.interpolate({ inputRange: [0, 1], outputRange: [flight.fy - 17, flight.ty - 17] }) },
+      { scale: fly.interpolate({ inputRange: [0, 1], outputRange: [1.7, 0.7] }) },
+    ],
+  } : null;
   return (
     <View style={{ alignItems: 'center', gap: space.sm }}>
       <View style={{ flexDirection: 'row', gap: space.xl }}>
         <Text variant="strong">You: {mineLeft}</Text><Text variant="strong">{who(first ? game.p2 : game.p1)}: {theirsLeft}</Text>
       </View>
-      <Dartboard size={size} darts={thrown} aim={mine && !sent ? aim : null} />
+      <View {...(mine && !sent ? pan.panHandlers : {})} accessible={false} style={{ width: size, height: size + zoneH, alignItems: 'center' }}>
+        <Dartboard size={size} darts={thrown} aim={null} />
+        <View pointerEvents="none" style={{ height: zoneH, width: size, alignItems: 'center', justifyContent: 'center' }}>
+          {mine && !sent ? <Text muted style={{ textAlign: 'center' }}>{hint ?? '⬆  Flick up from here to throw'}</Text> : null}
+        </View>
+        {flight && dartStyle ? (
+          <Animated.View pointerEvents="none" style={dartStyle}>
+            <View style={{ width: 4, height: 10, backgroundColor: '#d6342f', borderRadius: 2 }} />
+            <View style={{ width: 3, height: 24, backgroundColor: '#F5B83D', borderRadius: 2 }} />
+          </Animated.View>
+        ) : null}
+      </View>
       {mine ? <Text accessibilityLiveRegion="polite">This turn: {[0, 1, 2].map((i) => thrown[i]?.label ?? '–').join('  ·  ')}{note ? ` · ${note}` : ''}</Text> : null}
-      {mine ? <Button title="Throw" onPress={doThrow} disabled={sent} /> : null}
+      {mine && screenReader ? <Button title="Throw a dart" onPress={tapThrow} disabled={sent} /> : null}
       {turns.length ? turns.map((t, i) => <Text key={i} variant="small" muted>{t.by === 1 ? who(game.p1) : who(game.p2)}: {t.bust ? `${t.darts.join(' ')} · bust` : `${t.darts.join(' ')} = ${t.total}`}</Text>)
-        : <Text variant="small" muted>First to exactly 0 wins. Going past zero is a bust and the turn is lost. Tap Throw when the cross is where you want it.</Text>}
+        : <Text variant="small" muted>First to exactly 0 wins. Going past zero is a bust. Flick up: a firm flick hits the middle, a soft one falls short, a hard one flies high. Lean the flick left or right to aim.</Text>}
     </View>
   );
 }

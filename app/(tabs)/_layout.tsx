@@ -13,6 +13,7 @@ export default function TabsLayout() {
       tabBarStyle: { backgroundColor: colors.surface, borderTopColor: colors.border },
     }}>
       <Tabs.Screen name="index" options={{ title: 'Chats', tabBarIcon: icon('💬') }} />
+      <Tabs.Screen name="ai" options={{ title: 'Lunex', tabBarIcon: icon('✨') }} />
       <Tabs.Screen name="calls" options={{ title: 'Calls', tabBarIcon: icon('📞') }} />
       <Tabs.Screen name="status" options={{ title: 'Status', tabBarIcon: icon('⭕') }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings', tabBarIcon: icon('⚙️') }} />

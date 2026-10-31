@@ -1,7 +1,7 @@
 // The live race screen. Each phone drives its own car (same physics as the website) and broadcasts its position ~12 times a second;
 // the other car is drawn gliding to the last position received. Drawing is SVG; the world is static and only the camera moves.
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, Vibration, View } from 'react-native';
+import { PanResponder, Platform, Pressable, Vibration, View } from 'react-native';
 import Svg, { Circle, G, Path, Text as SvgText } from 'react-native-svg';
 import { Text } from '@/components/ui';
 import { CAR_LEN, CARS, newCar, stepCar, wrapAngle, type Car, type Track } from './engine';
@@ -33,11 +33,78 @@ function Hold({ label, a11y, keyName, keys, wide, color }: { label: string; a11y
   const set = (v: boolean) => { keys.current[keyName] = v; setOn(v); };
   return (
     <Pressable accessibilityRole="button" accessibilityLabel={a11y} onPressIn={() => set(true)} onPressOut={() => set(false)} hitSlop={6}
-      style={{ minWidth: wide ? 84 : 64, height: 70, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? color : 'rgba(10,10,14,.55)', borderWidth: 2, borderColor: color }}>
+      style={{ minWidth: wide ? 84 : 50, height: wide ? 56 : 70, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? color : 'rgba(10,10,14,.55)', borderWidth: 2, borderColor: color }}>
       <Text style={{ color: '#fff', fontWeight: '800', fontSize: wide ? 14 : 24 }}>{label}</Text>
     </Pressable>
   );
 }
+
+const MAX_LOCK = 110;   // degrees the wheel turns each way
+/** A steering wheel: put a finger on it and turn it like a real one. It springs back to centre when you let go. */
+function Wheel({ wheel }: { wheel: React.MutableRefObject<number> }) {
+  const [rot, setRot] = useState(0);
+  const box = useRef<React.ComponentRef<typeof View>>(null);
+  const st = useRef({ cx: 0, cy: 0, last: 0, rot: 0, timer: 0 as unknown as ReturnType<typeof setInterval> });
+  const apply = (r: number) => { st.current.rot = r; wheel.current = r / MAX_LOCK; setRot(r); };
+  const ang = (x: number, y: number) => (Math.atan2(y - st.current.cy, x - st.current.cx) * 180) / Math.PI;
+  useEffect(() => () => { clearInterval(st.current.timer); wheel.current = 0; }, [wheel]);
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: (e) => {
+      clearInterval(st.current.timer);
+      box.current?.measureInWindow((x, y, w, h) => { st.current.cx = x + w / 2; st.current.cy = y + h / 2; st.current.last = ang(e.nativeEvent.pageX, e.nativeEvent.pageY); });
+    },
+    onPanResponderMove: (e) => {
+      const a = ang(e.nativeEvent.pageX, e.nativeEvent.pageY);
+      let d = a - st.current.last; if (d > 180) d -= 360; if (d < -180) d += 360;
+      st.current.last = a;
+      apply(Math.max(-MAX_LOCK, Math.min(MAX_LOCK, st.current.rot + d)));
+    },
+    onPanResponderRelease: () => release(), onPanResponderTerminate: () => release(),
+  })).current;
+  function release() {
+    clearInterval(st.current.timer);
+    st.current.timer = setInterval(() => { const r = st.current.rot * 0.72; if (Math.abs(r) < 1.5) { apply(0); clearInterval(st.current.timer); } else apply(r); }, 16);
+  }
+  return (
+    <View ref={box} {...pan.panHandlers} accessibilityRole="adjustable" accessibilityLabel="Steering wheel. Turn with your finger." style={{ width: 118, height: 118 }}>
+      <View style={{ width: 118, height: 118, transform: [{ rotate: `${rot}deg` }] }}>
+        <Svg width={118} height={118} viewBox="-60 -60 120 120">
+          <Circle r={54} fill="rgba(10,10,14,.45)" />
+          <Circle r={50} fill="none" stroke="#2b2b33" strokeWidth={13} />
+          <Circle r={50} fill="none" stroke="#7a5cff" strokeWidth={3} strokeDasharray="2 7" />
+          <Path d="M-44 6H-14L-8 16H8L14 6H44" fill="none" stroke="#3a3a46" strokeWidth={9} strokeLinecap="round" strokeLinejoin="round" />
+          <Path d="M0 -50V-36" stroke="#e63946" strokeWidth={6} strokeLinecap="round" />
+          <Circle r={13} fill="#1d1d26" stroke="#7a5cff" strokeWidth={2} />
+          <SvgText y={5} fill="#fff" fontSize={13} fontWeight="900" textAnchor="middle">L</SvgText>
+        </Svg>
+      </View>
+    </View>
+  );
+}
+
+/** Round speedometer with needle, digital speed and gear. */
+const Speedo = memo(function Speedo({ kmh, top, gear }: { kmh: number; top: number; gear: string }) {
+  const max = Math.ceil((top * 1.05) / 50) * 50, a0 = -210, a1 = 30;          // sweep in degrees (0 = right, clockwise)
+  const frac = Math.max(0, Math.min(1, kmh / max)), a = a0 + (a1 - a0) * frac;
+  const P = (r: number, deg: number) => [r * Math.cos((deg * Math.PI) / 180), r * Math.sin((deg * Math.PI) / 180)];
+  const ticks = []; for (let v = 0; v <= max; v += 50) { const d = a0 + (a1 - a0) * (v / max), [x1, y1] = P(44, d), [x2, y2] = P(36, d); ticks.push(<Path key={v} d={`M${x1.toFixed(1)} ${y1.toFixed(1)}L${x2.toFixed(1)} ${y2.toFixed(1)}`} stroke={v > top ? '#e63946' : '#cfcfe0'} strokeWidth={2} />); }
+  const [nx, ny] = P(40, a), [sx, sy] = P(44, a0), [ex, ey] = P(44, a);
+  return (
+    <Svg width={116} height={116} viewBox="-58 -58 116 116" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <Circle r={55} fill="rgba(10,10,14,.7)" stroke="#3a3a46" strokeWidth={2} />
+      {ticks}
+      <Path d={`M${sx.toFixed(1)} ${sy.toFixed(1)}A44 44 0 ${frac > 0.67 ? 1 : 0} 1 ${ex.toFixed(1)} ${ey.toFixed(1)}`} fill="none" stroke="#7a5cff" strokeWidth={4} strokeLinecap="round" opacity={0.85} />
+      <Path d={`M0 0L${nx.toFixed(1)} ${ny.toFixed(1)}`} stroke="#ff4d4d" strokeWidth={3} strokeLinecap="round" />
+      <Circle r={5} fill="#ddd" />
+      <SvgText y={26} fill="#fff" fontSize={22} fontWeight="900" textAnchor="middle">{String(kmh)}</SvgText>
+      <SvgText y={38} fill="#aaa" fontSize={9} fontWeight="700" textAnchor="middle">km/h</SvgText>
+      <SvgText x={0} y={-14} fill="#F5B83D" fontSize={16} fontWeight="900" textAnchor="middle">{gear}</SvgText>
+    </Svg>
+  );
+});
 
 const MiniMap = memo(function MiniMap({ track, dots }: { track: Track; dots: { x: number; y: number; c: string }[] }) {
   const o = useMemo(() => trackOutline(track, 110, 76, 8), [track]);
@@ -56,6 +123,7 @@ export function RaceRun(p: Props) {
   const [note, setNote] = useState<string | null>(null);
   const [autoGas, setAutoGas] = useState(false);
   const keys = useRef<Keys>({ left: false, right: false, gas: false, brake: false });
+  const wheel = useRef(0);
   const autoRef = useRef(false); autoRef.current = autoGas;
   const cb = useRef(p); cb.current = p;
   const boxRef = useRef(box); boxRef.current = box;
@@ -114,7 +182,7 @@ export function RaceRun(p: Props) {
       while (s.acc >= step) {
         s.acc -= step;
         if (!racing || s.finished) { if (s.finished) stepCar(me, { gas: 0, brake: 1, steer: 0 }, t, step, []); continue; }
-        const k = keys.current, target = (k.right ? 1 : 0) - (k.left ? 1 : 0);
+        const k = keys.current, target = Math.max(-1, Math.min(1, (k.right ? 1 : 0) - (k.left ? 1 : 0) + wheel.current));
         s.steer += (target - s.steer) * Math.min(1, step * 9);
         stepCar(me, { steer: s.steer, gas: k.gas || (autoRef.current && !k.brake) ? 1 : 0, brake: k.brake ? 1 : 0 }, t, step, o.init ? [o] : []);
       }
@@ -144,6 +212,8 @@ export function RaceRun(p: Props) {
   const sx = s.shake * (Math.random() - 0.5), sy = s.shake * (Math.random() - 0.5);
   const lap = Math.min(p.laps, Math.max(1, Math.floor(me.total / t.N) + 1));
   const ahead = isAhead(me.total, o.total, s.finished ? me.finishMs : null, o.fin);
+  const fwd = me.vx * Math.cos(me.h) + me.vy * Math.sin(me.h);
+  const gear = fwd < -3 ? 'R' : s.sp < 2 ? 'N' : String(Math.max(1, Math.min(6, Math.ceil(Math.min(1, s.sp / me.spec.top) * 6))));
   let sk = ''; for (let i = 0; i < s.skids.length; i += 2) sk += `M${s.skids[i]} ${s.skids[i + 1]}h0.1`;
   const drawCar = (c: { x: number; y: number; h: number }, look: Look, brake: boolean, uid: string, name?: string) => (
     <G key={uid} transform={`translate(${c.x.toFixed(1)} ${c.y.toFixed(1)})`}>
@@ -181,26 +251,28 @@ export function RaceRun(p: Props) {
         <MiniMap track={t} dots={[...(o.init ? [{ x: o.x, y: o.y, c: p.opp.color }] : []), { x: me.x, y: me.y, c: p.me.color }]} />
       </View>
       <View pointerEvents="none" style={{ position: 'absolute', left: 10, right: 10, top: 62, alignItems: 'flex-start', flexDirection: 'row', gap: 8 }}>
-        <Chip big>{ahead ? '1st' : '2nd'}</Chip><Chip big>{Math.round(s.sp * 0.9)} km/h</Chip>
+        <Chip big>{ahead ? '1st' : '2nd'}</Chip>
+      </View>
+      <View pointerEvents="none" style={{ position: 'absolute', left: 6, top: 108 }}>
+        <Speedo kmh={Math.round(s.sp)} top={me.spec.top} gear={gear} />
       </View>
       {s.countdown ? <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, top: '28%', alignItems: 'center' }} accessibilityLiveRegion="assertive">
         <Text style={{ color: s.countdown === 'GO!' ? '#2ec27e' : '#fff', fontSize: 84, fontWeight: '900', textShadowColor: 'rgba(0,0,0,.7)', textShadowRadius: 8 }}>{s.countdown}</Text></View> : null}
       {note ? <View pointerEvents="none" style={{ position: 'absolute', left: 20, right: 20, top: '45%', alignItems: 'center' }}><View style={{ backgroundColor: 'rgba(10,10,14,.75)', padding: 10, borderRadius: 12 }}><Text style={{ color: '#fff', textAlign: 'center' }} accessibilityLiveRegion="polite">{note}</Text></View></View> : null}
 
-      <View pointerEvents="box-none" style={{ position: 'absolute', left: 12, right: 12, bottom: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <View style={{ flexDirection: 'row', gap: 10 }}>
+      <View pointerEvents="box-none" style={{ position: 'absolute', left: 8, right: 8, bottom: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Hold label="◀" a11y="Steer left" keyName="left" keys={keys} color="#7a5cff" />
+          <Wheel wheel={wheel} />
           <Hold label="▶" a11y="Steer right" keyName="right" keys={keys} color="#7a5cff" />
         </View>
-        <View style={{ gap: 10, alignItems: 'flex-end' }}>
+        <View style={{ gap: 8, alignItems: 'flex-end' }}>
           <Pressable accessibilityRole="button" accessibilityLabel="Automatic gas" accessibilityState={{ selected: autoGas }} onPress={() => setAutoGas((v) => !v)}
-            style={{ paddingHorizontal: 14, minHeight: 44, borderRadius: 14, justifyContent: 'center', backgroundColor: autoGas ? '#2ec27e' : 'rgba(10,10,14,.55)', borderWidth: 2, borderColor: '#2ec27e' }}>
+            style={{ paddingHorizontal: 12, minHeight: 40, borderRadius: 14, justifyContent: 'center', backgroundColor: autoGas ? '#2ec27e' : 'rgba(10,10,14,.55)', borderWidth: 2, borderColor: '#2ec27e' }}>
             <Text style={{ color: '#fff', fontWeight: '800' }}>AUTO</Text>
           </Pressable>
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            <Hold label="BRAKE" a11y="Brake" keyName="brake" keys={keys} wide color="#e63946" />
-            <Hold label="GAS" a11y="Gas" keyName="gas" keys={keys} wide color="#2ec27e" />
-          </View>
+          <Hold label="GAS" a11y="Gas" keyName="gas" keys={keys} wide color="#2ec27e" />
+          <Hold label="BRAKE" a11y="Brake" keyName="brake" keys={keys} wide color="#e63946" />
         </View>
       </View>
 
