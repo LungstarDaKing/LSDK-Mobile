@@ -8,7 +8,7 @@ export const env = {
   supabaseUrl: need(process.env.EXPO_PUBLIC_SUPABASE_URL, 'EXPO_PUBLIC_SUPABASE_URL'),
   supabaseKey: need(process.env.EXPO_PUBLIC_SUPABASE_KEY, 'EXPO_PUBLIC_SUPABASE_KEY'),
   // Fixed in code on purpose (not an env var): it must match the text in src/features/legal/docs.ts and the website's version.js.
-  termsVersion: '2026-10-22',
+  termsVersion: '2026-10-31',
   webUrl: process.env.EXPO_PUBLIC_WEB_URL ?? '',
   turnUrl: process.env.EXPO_PUBLIC_TURN_URL ?? '',
   lunexUrl: process.env.EXPO_PUBLIC_LUNEX_URL ?? '',

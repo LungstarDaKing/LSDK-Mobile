@@ -20,8 +20,8 @@ describe('legal text', () => {
     expect(JSON.stringify(DOCS.disclosures.body())).toContain('push token');
   });
   it('terms version matches the website version.js when that file is present', () => {
-    expect(env.termsVersion).toBe('2026-10-22');
-    const web = '/tmp/claude-0/web/LSDKChat/src/version.js';
+    expect(env.termsVersion).toBe('2026-10-31');
+    const web = '/home/claude/LSDKWeb/src/version.js';
     if (fs.existsSync(web)) expect(fs.readFileSync(web, 'utf8')).toContain(env.termsVersion);
   });
 });

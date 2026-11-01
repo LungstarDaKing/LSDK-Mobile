@@ -1,4 +1,4 @@
-// Terms of Use, Privacy Policy and Disclosures, ported from the website (src/pages/legal.js, version 2026-10-22).
+// Terms of Use, Privacy Policy and Disclosures, ported from the website (src/pages/legal.js, version 2026-10-31).
 // KEEP IN SYNC with the website: when the web text changes, copy it here and bump EXPO_PUBLIC_TERMS_VERSION on both.
 // Wording that says "browser" or "web" still describes the website; the "Mobile app" sections below add what is different on a phone.
 export type Section = { h: string; p?: string[]; ul?: string[] };

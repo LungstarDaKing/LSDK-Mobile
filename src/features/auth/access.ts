@@ -17,7 +17,10 @@ export function onAccess(fn: () => void): () => void { listeners.add(fn); return
 export const SPARKS = 24;
 export const SPARK_COLORS = ['#f5b83d', '#ffe29a', '#a996ff', '#2dd4bf', '#ffffff'] as const;
 export const TITLE = 'Access granted';
-export const SHOW_MS = { normal: 2100, calm: 900 } as const;
+export const WORDS = ['ACCESS', 'GRANTED'] as const;
+export const LOG = ['Session verified', 'Profile loaded', 'Link established'] as const;
+export const hudId = (rng: () => number = Math.random) => 'ID ' + Array.from({ length: 3 }, () => Math.floor(rng() * 256).toString(16).padStart(2, '0')).join('').toUpperCase();
+export const SHOW_MS = { normal: 2900, calm: 1000 } as const;   // same timing as the website
 
 /** Spark directions/distances/sizes (deterministic when an rng is passed, for tests). */
 export function makeSparks(rng: () => number = Math.random) {
